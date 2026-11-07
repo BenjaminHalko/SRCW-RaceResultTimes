@@ -3,10 +3,9 @@
 local ROW_CLASS = "/Game/01_Union/UI/Result/WBP_Result_Sub_RankingTable_GP_02.WBP_Result_Sub_RankingTable_GP_02_C"
 local LINE_CLASS = "/Game/01_Union/UI/Result/WBP_Result_Sub_RankingTable_GP_Line.WBP_Result_Sub_RankingTable_GP_Line_C"
 local LOADING_CLASS = "/Game/01_Union/UI/System/WBP_System_Loading_BG.WBP_System_Loading_BG_C"
-local LINE_ROWS = 12
 local RESULTS = "/Script/UNION.Default__AppRaceResultDataAccessor"
 local RACE_CONFIG = "/Script/UNION.Default__AppRaceConfigDataAccessor"
-local FORMATTER = "/Script/UNION.Default__RaceResultSequenceStateParty"
+local TIME_TRIAL = "/Script/UNION.Default__TimeTrialUtilityLibrary"
 local RESULT_FOUND = 0
 local RF_DEFAULT_OR_TEMPLATE = 0x30
 
@@ -34,13 +33,18 @@ local POINTS_PADDING = { Left = 100, Top = 0, Right = 0, Bottom = 0 }
 local NO_PADDING = { Left = 0, Top = 0, Right = 0, Bottom = 0 }
 local ALIGN_CENTER = 2
 local VIS_VISIBLE, VIS_HIDDEN = 0, 2
+local NO_TIME = FText(" ")
 
-local function child(w, name)
-  return StaticFindObject(w.WidgetTree:GetFullName():match("^%S+ (.+)$") .. "." .. name)
+local LINE_ROWS = {}
+for i = 1, 12 do LINE_ROWS[i] = ("WBP_Result_Sub_RankingTable_GP_%02d"):format(i) end
+
+-- Path prefix of the widgets in w's layout that aren't exposed as properties.
+local function treePath(w)
+  return w.WidgetTree:GetFullName():match("^%S+ (.+)$") .. "."
 end
 
-local function seconds(t)
-  return t.MinutePart * 60 + t.SecondPart + t.MillimeterSecondPart / 1000
+local function milliseconds(t)
+  return (t.MinutePart * 60 + t.SecondPart) * 1000 + t.MillimeterSecondPart
 end
 
 -- The results keep each racer's total time before and after this race.
@@ -48,8 +52,8 @@ local function raceTime(racerIndex)
   local data, pin = {}, {}
   find(RESULTS):GetAppRacePlayerResultData(racerIndex, data, pin)
   if pin.OutExecsPin ~= RESULT_FOUND then return end
-  local t = seconds(data.RacerTotalTimes) - seconds(data.TotalTimesPrev)
-  if t > 0 then return t end
+  local ms = milliseconds(data.RacerTotalTimes) - milliseconds(data.TotalTimesPrev)
+  if ms > 0 then return ms end
 end
 
 local function addSlot(box, widget, padding)
@@ -61,10 +65,10 @@ end
 
 -- The row's own time text (after the points) moves in front of the rating and points, at a smaller
 -- size. Done once per row.
-local function moveTime(row)
+local function moveTime(row, tree)
   local box, rating = row.TXT_Time:GetParent(), row.DSP_Online
   if box:GetChildIndex(row.TXT_Time) < box:GetChildIndex(rating) then return end
-  local points, spacer = row.SizeBox_Offline, child(row, "Spacer_102")
+  local points, spacer = row.SizeBox_Offline, StaticFindObject(tree .. "Spacer_102")
   for _, w in ipairs({ row.TXT_Time, rating, points, spacer }) do box:RemoveChild(w) end
   addSlot(box, row.TXT_Time, NO_PADDING)
   addSlot(box, rating, RATING_PADDING):SetHorizontalAlignment(ALIGN_CENTER)
@@ -93,12 +97,14 @@ end
 
 local function showTime(row)
   if not isResultsTable(owner(row)) then return end
-  moveTime(row)
+  local tree = treePath(row)
+  moveTime(row, tree)
   local online = find(RACE_CONFIG):GetIsOnlineGameMode()
   row.TXT_Time.Slot:SetPadding(online and TIME_PADDING_ONLINE or NO_PADDING)
-  child(row, "SizeBox_Name"):SetWidthOverride(online and ONLINE_NAME_WIDTH or NAME_WIDTH)
-  local t = raceTime(row.RacerIndex)
-  row.TXT_Time:SetText(FText(t and find(FORMATTER):FloatTimeToString(t):ToString() or " "))
+  local nameBox = StaticFindObject(tree .. "SizeBox_Name")
+  nameBox:SetWidthOverride(online and ONLINE_NAME_WIDTH or NAME_WIDTH)
+  local ms = raceTime(row.RacerIndex)
+  row.TXT_Time:SetText(ms and find(TIME_TRIAL):LapTimeText(ms) or NO_TIME)
   row.TXT_Time:SetVisibility(VIS_VISIBLE)
 end
 
@@ -110,7 +116,7 @@ end
 -- The cup standings, once the results card flips over to them.
 local function hideLineTimes(line)
   if not isResultsTable(line) then return end
-  for i = 1, LINE_ROWS do hideTime(line[("WBP_Result_Sub_RankingTable_GP_%02d"):format(i)]) end
+  for _, name in ipairs(LINE_ROWS) do hideTime(line[name]) end
 end
 
 local hooks = {
