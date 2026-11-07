@@ -32,7 +32,6 @@ local RATING_PADDING = { Left = -RATING_OVERLAP, Top = 0, Right = -70, Bottom = 
 local POINTS_PADDING = { Left = 100, Top = 0, Right = 0, Bottom = 0 }
 local ALIGN_CENTER = 2
 local VIS_VISIBLE, VIS_HIDDEN = 0, 2
-local NO_TIME = FText(" ")
 
 local LINE_ROWS = {}
 for i = 1, 12 do LINE_ROWS[i] = ("WBP_Result_Sub_RankingTable_GP_%02d"):format(i) end
@@ -93,11 +92,12 @@ local function raceTime(racer)
   if ms > 0 then return ms end
 end
 
+-- Racers without a time just have it hidden, which also clears a time left from a re-sort.
 local function showTime(row)
   if not isResultsTable(owner(row)) then return end
   local ms, time = raceTime(row.RacerIndex), row.TXT_Time
-  time:SetText(ms and find(TIME_TRIAL):LapTimeText(ms) or NO_TIME)
-  time:SetVisibility(VIS_VISIBLE)
+  if ms then time:SetText(find(TIME_TRIAL):LapTimeText(ms)) end
+  time:SetVisibility(ms and VIS_VISIBLE or VIS_HIDDEN)
 end
 
 -- The cup standings, once the results card flips over to them. Hidden rather than collapsed, so
