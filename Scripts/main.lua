@@ -30,54 +30,12 @@ local TIME_PADDING_ONLINE = { Left = 0, Top = 0, Right = RATING_OVERLAP, Bottom 
 -- The rating's and points' own slot settings, as the game lays them out.
 local RATING_PADDING = { Left = -RATING_OVERLAP, Top = 0, Right = -70, Bottom = 10 }
 local POINTS_PADDING = { Left = 100, Top = 0, Right = 0, Bottom = 0 }
-local NO_PADDING = { Left = 0, Top = 0, Right = 0, Bottom = 0 }
 local ALIGN_CENTER = 2
 local VIS_VISIBLE, VIS_HIDDEN = 0, 2
 local NO_TIME = FText(" ")
 
 local LINE_ROWS = {}
 for i = 1, 12 do LINE_ROWS[i] = ("WBP_Result_Sub_RankingTable_GP_%02d"):format(i) end
-
--- Path prefix of the widgets in w's layout that aren't exposed as properties.
-local function treePath(w)
-  return w.WidgetTree:GetFullName():match("^%S+ (.+)$") .. "."
-end
-
-local function milliseconds(t)
-  return (t.MinutePart * 60 + t.SecondPart) * 1000 + t.MillimeterSecondPart
-end
-
--- The results keep each racer's total time before and after this race.
-local function raceTime(racerIndex)
-  local data, pin = {}, {}
-  find(RESULTS):GetAppRacePlayerResultData(racerIndex, data, pin)
-  if pin.OutExecsPin ~= RESULT_FOUND then return end
-  local ms = milliseconds(data.RacerTotalTimes) - milliseconds(data.TotalTimesPrev)
-  if ms > 0 then return ms end
-end
-
-local function addSlot(box, widget, padding)
-  local slot = box:AddChildToHorizontalBox(widget)
-  slot:SetVerticalAlignment(ALIGN_CENTER)
-  slot:SetPadding(padding)
-  return slot
-end
-
--- The row's own time text (after the points) moves in front of the rating and points, at a smaller
--- size. Done once per row.
-local function moveTime(row, tree)
-  local box, rating = row.TXT_Time:GetParent(), row.DSP_Online
-  if box:GetChildIndex(row.TXT_Time) < box:GetChildIndex(rating) then return end
-  local points, spacer = row.SizeBox_Offline, StaticFindObject(tree .. "Spacer_102")
-  for _, w in ipairs({ row.TXT_Time, rating, points, spacer }) do box:RemoveChild(w) end
-  addSlot(box, row.TXT_Time, NO_PADDING)
-  addSlot(box, rating, RATING_PADDING):SetHorizontalAlignment(ALIGN_CENTER)
-  addSlot(box, points, POINTS_PADDING):SetHorizontalAlignment(ALIGN_CENTER)
-  addSlot(box, spacer, NO_PADDING)
-  local font = row.TXT_Time.Font
-  font.Size = TIME_FONT_SIZE
-  row.TXT_Time:SetFont(font)
-end
 
 -- The widget whose layout holds w.
 local function owner(w)
@@ -95,31 +53,62 @@ local function isResultsTable(line)
   return isA(line, LINE_CLASS) and not isA(owner(line), LOADING_CLASS)
 end
 
-local function showTime(row)
+local function addCentered(box, widget, padding)
+  local slot = box:AddChildToHorizontalBox(widget)
+  slot:SetVerticalAlignment(ALIGN_CENTER)
+  slot:SetHorizontalAlignment(ALIGN_CENTER)
+  slot:SetPadding(padding)
+end
+
+-- The rating, points and the spacer that ends the row move after the row's own time text, which is
+-- shown smaller. Done as the row is built, before it is first laid out.
+local function layOutRow(row)
   if not isResultsTable(owner(row)) then return end
-  local tree = treePath(row)
-  moveTime(row, tree)
+  local tree = row.WidgetTree:GetFullName():match("^%S+ (.+)$") .. "."
+  local time, rating, points = row.TXT_Time, row.DSP_Online, row.SizeBox_Offline
+  local box, spacer = time:GetParent(), StaticFindObject(tree .. "Spacer_102")
+  for _, w in ipairs({ rating, points, spacer }) do box:RemoveChild(w) end
+  addCentered(box, rating, RATING_PADDING)
+  addCentered(box, points, POINTS_PADDING)
+  box:AddChildToHorizontalBox(spacer)
   local online = find(RACE_CONFIG):GetIsOnlineGameMode()
-  row.TXT_Time.Slot:SetPadding(online and TIME_PADDING_ONLINE or NO_PADDING)
+  if online then time.Slot:SetPadding(TIME_PADDING_ONLINE) end
+  local font = time.Font
+  font.Size = TIME_FONT_SIZE
+  time:SetFont(font)
   local nameBox = StaticFindObject(tree .. "SizeBox_Name")
   nameBox:SetWidthOverride(online and ONLINE_NAME_WIDTH or NAME_WIDTH)
-  local ms = raceTime(row.RacerIndex)
-  row.TXT_Time:SetText(ms and find(TIME_TRIAL):LapTimeText(ms) or NO_TIME)
-  row.TXT_Time:SetVisibility(VIS_VISIBLE)
 end
 
--- Hidden rather than collapsed, so nothing else in the row moves.
-local function hideTime(row)
-  row.TXT_Time:SetVisibility(VIS_HIDDEN)
+local function milliseconds(t)
+  return (t.MinutePart * 60 + t.SecondPart) * 1000 + t.MillimeterSecondPart
 end
 
--- The cup standings, once the results card flips over to them.
+-- The results keep each racer's total time before and after this race.
+local function raceTime(racer)
+  local data, pin = {}, {}
+  find(RESULTS):GetAppRacePlayerResultData(racer, data, pin)
+  if pin.OutExecsPin ~= RESULT_FOUND then return end
+  local ms = milliseconds(data.RacerTotalTimes) - milliseconds(data.TotalTimesPrev)
+  if ms > 0 then return ms end
+end
+
+local function showTime(row)
+  if not isResultsTable(owner(row)) then return end
+  local ms, time = raceTime(row.RacerIndex), row.TXT_Time
+  time:SetText(ms and find(TIME_TRIAL):LapTimeText(ms) or NO_TIME)
+  time:SetVisibility(VIS_VISIBLE)
+end
+
+-- The cup standings, once the results card flips over to them. Hidden rather than collapsed, so
+-- nothing else in the row moves.
 local function hideLineTimes(line)
   if not isResultsTable(line) then return end
-  for _, name in ipairs(LINE_ROWS) do hideTime(line[name]) end
+  for _, name in ipairs(LINE_ROWS) do line[name].TXT_Time:SetVisibility(VIS_HIDDEN) end
 end
 
 local hooks = {
+  { path = ROW_CLASS .. ":Construct", fn = layOutRow },
   { path = ROW_CLASS .. ":SetRacerIndex", fn = showTime },
   { path = LINE_CLASS .. ":PlayTotalInAnimForResult", fn = hideLineTimes },
   { path = LINE_CLASS .. ":PlayTotalInAnim_Impl", fn = hideLineTimes },
@@ -137,7 +126,8 @@ end
 local pending = #hooks
 local function tryHooks()
   for _, h in ipairs(hooks) do
-    if not h.done and StaticFindObject(h.path):IsValid() and pcall(RegisterHook, h.path, safely(h.fn)) then
+    local ready = not h.done and StaticFindObject(h.path):IsValid()
+    if ready and pcall(RegisterHook, h.path, safely(h.fn)) then
       h.done, pending = true, pending - 1
     end
   end
